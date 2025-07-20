@@ -1,0 +1,12 @@
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.ipynb_checkpoints
+
+# API Key (VERY IMPORTANT!)
+desktop_story_generator.py
