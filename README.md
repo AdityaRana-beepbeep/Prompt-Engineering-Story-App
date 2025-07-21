@@ -31,8 +31,8 @@ Follow these steps to set up and run the AI Story Generator on your local machin
 First, clone this GitHub repository to your local machine:
 
 ```bash
-git clone [https://github.com/](https://github.com/)[your-username]/[your-repo-name].git
-cd [your-repo-name]
+git clone [[https://github.com/]https://github.com/AdityaRana-beepbeep/Prompt-Engineering-Story-App].git
+cd [Prompt-Engineering-App]
 2. Install Dependencies
 You'll need to install the required Python libraries. It's recommended to use a virtual environment.
 
