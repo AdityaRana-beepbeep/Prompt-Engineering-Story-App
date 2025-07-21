@@ -121,4 +121,4 @@ Explore more advanced prompt engineering techniques or custom instructions.
 Integrate image generation based on story themes (requires more complex APIs and rendering).
 
 📄 License
-This project is open-source and available under the MIT License. (You might want to create a LICENSE file in your repo with the MIT license text)
+This project is open-source and available under the MIT License.
