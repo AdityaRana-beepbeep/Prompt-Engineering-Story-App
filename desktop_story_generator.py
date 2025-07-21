@@ -17,25 +17,24 @@ def generate_zero_shot_prompt(user_prompt):
 
 def generate_few_shot_prompt(user_prompt):
     """
-    Generates a few-shot prompt with examples.
+    Generates a few-shot prompt with concise examples to reduce token count.
     Args:
         user_prompt (str): The user's input prompt.
     Returns:
         str: The few-shot prompt.
     """
-    return f"""Here are a few examples of stories based on prompts:
+    return f"""Examples:
+Prompt: Brave knight quest.
+Story: Sir Reginald, brave and true, sought the Dragon's Tear. Through enchanted forests and over treacherous mountains, he faced goblins and riddles. He found the dragon, not fierce, but guarding a single, glowing tear. It healed his ailing village, proving courage comes in many forms.
 
-Prompt: A detective solving a mystery in a haunted mansion.
-Story: Detective Miles Corbin adjusted his fedora as he stepped into Blackwood Manor, a place whispered to be cursed. Dust motes danced in the slivers of moonlight, illuminating cobweb-draped chandeliers. The case was simple: a missing heirloom. But the chilling whispers and phantom footsteps suggested a more spectral culprit. Miles, a man of logic, found himself questioning everything as a cold breath ghosted his neck, and a spectral hand pointed towards a hidden passage behind a crumbling fireplace. Following the eerie guidance, he discovered not only the missing jewel but also the diary of a heartbroken ghost, revealing a tale of betrayal and a hidden will. The mystery was solved, but Miles left with a new respect for the unseen.
-
-Prompt: A space explorer discovering a new alien species.
-Story: Commander Eva Rostova's probe detected an unusual energy signature on Kepler-186f. Landing her shuttle, she found a forest of bioluminescent flora, pulsating with soft light. Deeper within, she encountered them: beings of pure light, shifting and swirling like living nebulae. They communicated not with sound, but with intricate patterns of light that conveyed complex emotions and histories. Eva spent weeks observing, learning their silent language, and realized they were not just a new species, but a living library of cosmic knowledge, sharing their wisdom through ethereal dances.
+Prompt: Alien discovery.
+Story: Commander Eva landed on Kepler-186f. Bioluminescent flora pulsed. She met beings of pure light, communicating through shifting patterns. They were a living cosmic library, sharing wisdom through ethereal dances.
 
 Now, write a short story about: {user_prompt}"""
 
 def generate_chain_of_thought_prompt(user_prompt):
     """
-    Generates a chain-of-thought prompt.
+    Generates a chain-of-thought prompt with concise steps to reduce token count.
     Args:
         user_prompt (str): The user's input prompt.
     Returns:
@@ -43,10 +42,10 @@ def generate_chain_of_thought_prompt(user_prompt):
     """
     return f"""Let's think step by step to create a compelling short story about: {user_prompt}.
 
-First, brainstorm a main character, their core desire, and a significant obstacle they face.
-Second, outline a simple plot: introduction, rising action (with the obstacle), climax (where they confront the obstacle), falling action, and resolution.
-Third, consider the setting and its atmosphere.
-Finally, write the story, incorporating these elements."""
+1. Character: Define main character, desire, obstacle.
+2. Plot: Outline intro, rising action (obstacle), climax, falling action, resolution.
+3. Setting: Describe atmosphere.
+4. Story: Write, incorporating these elements."""
 
 def get_story_from_gemini(full_prompt):
     """
@@ -83,7 +82,9 @@ def get_story_from_gemini(full_prompt):
            len(result["candidates"][0]["content"]["parts"]) > 0:
             return result["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return "Could not generate a story. The AI response was empty or malformed."
+            # Check for specific error messages from the API response body
+            error_message = result.get("error", {}).get("message", "Unknown API error.")
+            return f"Could not generate a story. API response was empty or malformed. Error: {error_message}"
     except requests.exceptions.RequestException as e:
         return f"An error occurred while connecting to the API: {e}"
     except json.JSONDecodeError:
@@ -106,10 +107,12 @@ class StoryGeneratorApp:
             # self.tts_engine.setProperty('voice', voices[0].id) # Change voice if needed
             self.tts_engine.setProperty('rate', 170) # Speed of speech
             self.tts_engine_ready = True
+            print("TTS engine initialized successfully.") # Debug print
         except Exception as e:
             self.tts_engine = None
             self.tts_engine_ready = False
             messagebox.showwarning("TTS Warning", f"Text-to-Speech engine could not be initialized: {e}\nVoice features will be disabled.")
+            print(f"TTS engine initialization failed: {e}") # Debug print
 
         # Configure grid weights for responsive layout
         master.grid_rowconfigure(0, weight=0) # Title row
@@ -253,24 +256,86 @@ class StoryGeneratorApp:
         else:
             full_prompt = generate_zero_shot_prompt(user_prompt) # Fallback
 
+        print(f"\n--- Debug: Generating story with method: {selected_method} ---") # Debug print
+        print(f"--- Debug: Full prompt sent to API (first 200 chars):\n{full_prompt[:200]}...") # Debug print
+        print(f"--- Debug: Full prompt length: {len(full_prompt)} chars ---") # Debug print
+
         generated_story = get_story_from_gemini(full_prompt)
 
-        # Update GUI elements back on the main thread
-        self.master.after(0, self._update_gui_after_generation, generated_story)
+        print(f"--- Debug: Generated Story (first 200 chars):\n{generated_story[:200]}...") # Debug print
+        print(f"--- Debug: Generated Story length: {len(generated_story)} ---") # Debug print
 
-    def _update_gui_after_generation(self, generated_story):
+        # --- NEW: Extract and clean the story part for Few-shot and Chain-of-Thought ---
+        processed_story_text = generated_story
+
+        # Universal cleaning for all methods to remove common prompt/markdown artifacts
+        processed_story_text = processed_story_text.replace('**', '') # Remove markdown bolding
+
+        # Specific parsing based on method
+        if selected_method == "few-shot":
+            # For few-shot, the model often repeats "Prompt: ... Story: ..." for the new story
+            story_marker = "Story:"
+            if story_marker in processed_story_text:
+                # Take everything after the LAST "Story:" marker
+                processed_story_text = processed_story_text.rsplit(story_marker, 1)[-1].strip()
+            else:
+                print("--- Debug: 'Story:' marker not found in Few-shot generated text for parsing. Using full text. ---")
+                # Fallback to general cleaning if marker not found
+                processed_story_text = processed_story_text.replace('Prompt:', '').replace('Examples:', '').strip()
+
+        elif selected_method == "chain-of-thought":
+            # For chain-of-thought, the model outputs thought steps first, then the story.
+            # We need to find where the story actually begins after the planning.
+            lines = processed_story_text.split('\n')
+            story_lines = []
+            in_story_section = False # Initialize in_story_section here
+            for line in lines:
+                stripped_line = line.strip()
+                # Heuristic: Start story section after numbered list items or if we already started
+                # This checks for lines starting with a number followed by a dot and space (e.g., "1. ")
+                if not in_story_section and (stripped_line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')) or stripped_line.startswith(('10.', '11.'))):
+                    continue # Skip thought process steps
+                else:
+                    in_story_section = True
+                    story_lines.append(line) # Add the line to story content
+
+            processed_story_text = '\n'.join(story_lines).strip()
+
+            # If the parsing above results in empty text (e.g., if the model didn't follow the format strictly),
+            # fall back to a simpler cleaning.
+            if not processed_story_text:
+                processed_story_text = generated_story.replace('**', '').replace('Prompt:', '').replace('Story:', '').replace('Examples:', '').strip()
+                print("--- Debug: Chain-of-Thought parsing resulted in empty text, falling back to basic cleaning. ---")
+            else:
+                # One last check for "Story:" if it was missed by the line-by-line parsing
+                story_marker = "Story:"
+                if story_marker in processed_story_text:
+                    processed_story_text = processed_story_text.rsplit(story_marker, 1)[-1].strip()
+
+
+        # --- END NEW ---
+
+        # Update GUI elements back on the main thread
+        self.master.after(0, self._update_gui_after_generation, processed_story_text) # Pass processed_story_text
+
+    def _update_gui_after_generation(self, generated_story): # Renamed parameter for clarity
         """Updates the GUI after story generation is complete."""
         self.story_output.delete(1.0, tk.END)
         self.story_output.insert(tk.END, generated_story)
         self.set_inputs_state(tk.NORMAL) # Re-enable inputs
 
+        print(f"--- Debug: Checking generated_story for errors: {generated_story[:50]}...") # Debug print
         if "Error:" in generated_story or "Could not generate" in generated_story:
             self.show_message("Story generation failed. See output for details.", is_error=True)
             self.read_button.config(state=tk.DISABLED) # Keep read button disabled on error
+            print("--- Debug: Read button disabled due to error in generated story. ---") # Debug print
         else:
             self.show_message("Story generated successfully!", is_error=False) # Success message
             if self.tts_engine_ready:
                 self.read_button.config(state=tk.NORMAL) # Enable read button if TTS is ready
+                print("--- Debug: Read button enabled. ---") # Debug print
+            else:
+                print("--- Debug: Read button remains disabled, TTS engine not ready. ---") # Debug print
 
     def start_reading_story(self):
         """Starts reading the story aloud in a separate thread."""
@@ -279,8 +344,10 @@ class StoryGeneratorApp:
             return
 
         story_text = self.story_output.get(1.0, tk.END).strip()
+        print(f"--- Debug: Attempting to read story. Length: {len(story_text)}. First 50 chars: {story_text[:50]}...") # Debug print
         if not story_text or story_text == "Generating story... Please wait.":
             self.show_message("No story to read.", is_error=True)
+            print("--- Debug: No story text found or still 'Generating story...'. ---") # Debug print
             return
 
         self.read_button.config(state=tk.DISABLED)
@@ -292,11 +359,15 @@ class StoryGeneratorApp:
 
     def _read_story_thread(self, text):
         """Threaded function to handle TTS."""
+        print(f"--- Debug: _read_story_thread received text for TTS. Length: {len(text)}. First 50 chars: {text[:50]}...") # Debug print
         if self.tts_engine:
             self.tts_engine.say(text)
             self.tts_engine.runAndWait()
+            print("--- Debug: pyttsx3.runAndWait() completed. ---") # Debug print
             # After speech is done, update button states on the main thread
             self.master.after(0, self._update_tts_buttons_after_speech)
+        else:
+            print("--- Debug: TTS engine not available in _read_story_thread. ---") # Debug print
 
     def stop_reading_story(self):
         """Stops the current story narration."""
@@ -305,12 +376,14 @@ class StoryGeneratorApp:
             self.show_message("Story narration stopped.", is_error=False)
             self.read_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
+            print("--- Debug: TTS stopped via stop_reading_story. ---") # Debug print
 
     def _update_tts_buttons_after_speech(self):
         """Updates TTS button states after speech finishes naturally."""
         self.read_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.clear_message() # Clear "Reading story..." message
+        print("--- Debug: TTS buttons updated after speech completion. ---") # Debug print
 
 if __name__ == "__main__":
     root = tk.Tk()

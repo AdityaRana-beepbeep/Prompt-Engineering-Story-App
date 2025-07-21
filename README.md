@@ -4,14 +4,14 @@
 
 This project is a desktop application that generates creative stories using Google's powerful Gemini API. It's designed to showcase and allow experimentation with different **Prompt Engineering** techniques: Zero-shot, Few-shot, and Chain-of-Thought prompting.
 
-A key new feature is the integration of **Text-to-Speech (TTS)**, enabling the application to read the generated stories aloud, enhancing accessibility and providing a more immersive user experience.
+A key new feature is the integration of **Text-to-Speech (TTS)**, enabling the application to read the generated stories aloud, enhancing accessibility and providing a more immersive user experience. **The voice recitation now works seamlessly across all prompting methods!**
 
 ## 🚀 Features
 
 * **Zero-shot Prompting:** Generate stories directly from a simple topic or prompt, relying solely on the model's pre-trained knowledge.
 * **Few-shot Prompting:** Guide the AI with a few examples of input-output pairs to steer the story generation towards a desired style, tone, or structure.
 * **Chain-of-Thought Prompting (CoT):** Encourage the AI to "think step-by-step" by breaking down the complex task of story creation into smaller, logical reasoning steps, often leading to more coherent and detailed narratives.
-* **Voice Recitation (TTS):** Listen to your generated stories aloud with integrated Text-to-Speech functionality.
+* **Voice Recitation (TTS):** Listen to your generated stories aloud with integrated Text-to-Speech functionality, **now fully supported for all generation methods.**
 * **User-Friendly GUI:** An intuitive graphical interface built with Tkinter for easy interaction.
 
 ## 🛠️ Technologies Used
@@ -33,6 +33,17 @@ First, clone this GitHub repository to your local machine:
 ```bash
 git clone [[https://github.com/]https://github.com/AdityaRana-beepbeep/Prompt-Engineering-Story-App].git
 cd [Prompt-Engineering-App]
+
+# Create a virtual environment (optional but recommended)
+python -m venv venv
+# Activate the virtual environment
+# On Windows:
+# venv\Scripts\activate
+# On macOS/Linux:
+# source venv/bin/activate
+
+# Install the necessary Python packages
+pip install requests pyttsx3
 2. Install Dependencies
 You'll need to install the required Python libraries. It's recommended to use a virtual environment.
 
@@ -93,7 +104,7 @@ Replace "YOUR_API_KEY_HERE" with the exact API key you copied from Google AI Stu
 
 Python
 
-api_key = "AIzaSyBZXfaKk2g5klZfoNaOtIWriYO1IiuKsw8_your_actual_full_key_here"
+api_key = "AIzaSyBZXfaKk2g5klZfoNaOtIWriYO1IiuKsw8"
 Save the desktop_story_generator.py file.
 
 ⚠️ Security Warning: For production applications, hardcoding API keys is not recommended. Consider using environment variables or a secure secret management system. For this personal project, ensuring desktop_story_generator.py is in your .gitignore file (which it should be if you followed initial setup) prevents it from being committed to GitHub.
@@ -107,7 +118,9 @@ python desktop_story_generator.py
 A GUI window will appear, allowing you to generate and listen to AI-powered stories!
 
 📸 Screenshots / Demo
+
 <img width="1919" height="1199" alt="Screenshot 2025-07-21 104220" src="https://github.com/user-attachments/assets/14e33edd-3847-434b-8b51-a5a38c5756bd" />
+
 
 💡 Future Enhancements
 Allow users to select different voices or adjust speech rate/volume.
@@ -121,4 +134,4 @@ Explore more advanced prompt engineering techniques or custom instructions.
 Integrate image generation based on story themes (requires more complex APIs and rendering).
 
 📄 License
-This project is open-source and available under the MIT License.
+This project is open-source and available under the MIT License. (You might want to create a LICENSE file in your repo with the MIT license text)
