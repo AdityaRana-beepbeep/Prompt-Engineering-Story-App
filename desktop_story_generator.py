@@ -2,7 +2,8 @@ import tkinter as tk
 from tkinter import scrolledtext, messagebox
 import requests
 import json
-import threading # For running API call in a separate thread to keep GUI responsive
+import threading # For running API call and TTS in separate threads to keep GUI responsive
+import pyttsx3   # For Text-to-Speech
 
 def generate_zero_shot_prompt(user_prompt):
     """
@@ -57,7 +58,7 @@ def get_story_from_gemini(full_prompt):
     """
     # IMPORTANT: Replace "YOUR_API_KEY_HERE" with your actual Gemini API key.
     # You can get one from Google AI Studio: https://aistudio.google.com/app/apikey
-    api_key = "AIzaSyBZXfaKk2g5klZfoNaOtIWriYO1IiuKsw8"
+    api_key = "AIzaSyAlWhf3vTzvdfDQCRproN7EUK0ajbf209A"
 
     if api_key == "YOUR_API_KEY_HERE" or not api_key:
         # Using messagebox for critical error that prevents API call
@@ -97,6 +98,19 @@ class StoryGeneratorApp:
         master.geometry("800x750") # Slightly larger default window size
         master.resizable(True, True) # Allow resizing
 
+        # Initialize Text-to-Speech engine
+        try:
+            self.tts_engine = pyttsx3.init()
+            # You can set properties like voice, rate, volume here
+            # voices = self.tts_engine.getProperty('voices')
+            # self.tts_engine.setProperty('voice', voices[0].id) # Change voice if needed
+            self.tts_engine.setProperty('rate', 170) # Speed of speech
+            self.tts_engine_ready = True
+        except Exception as e:
+            self.tts_engine = None
+            self.tts_engine_ready = False
+            messagebox.showwarning("TTS Warning", f"Text-to-Speech engine could not be initialized: {e}\nVoice features will be disabled.")
+
         # Configure grid weights for responsive layout
         master.grid_rowconfigure(0, weight=0) # Title row
         master.grid_rowconfigure(1, weight=0) # Prompt input row
@@ -104,6 +118,7 @@ class StoryGeneratorApp:
         master.grid_rowconfigure(3, weight=0) # Message/loading row
         master.grid_rowconfigure(4, weight=0) # Generate button row
         master.grid_rowconfigure(5, weight=1) # Story output textarea row (expands vertically)
+        master.grid_rowconfigure(6, weight=0) # Read/Stop buttons row
         master.grid_columnconfigure(0, weight=1) # Main column (expands horizontally)
 
         # Title
@@ -163,6 +178,29 @@ class StoryGeneratorApp:
         self.story_output = scrolledtext.ScrolledText(self.output_frame, wrap=tk.WORD, font=("Arial", 11), bd=2, relief=tk.SUNKEN, bg="#f9fafb") # Added background color
         self.story_output.grid(row=1, column=0, sticky="nsew") # sticky="nsew" makes it expand
 
+        # Read/Stop Buttons Frame
+        self.tts_button_frame = tk.Frame(master, padx=10, pady=10)
+        self.tts_button_frame.grid(row=6, column=0, sticky="ew")
+        self.tts_button_frame.grid_columnconfigure(0, weight=1)
+        self.tts_button_frame.grid_columnconfigure(1, weight=1)
+
+        self.read_button = tk.Button(self.tts_button_frame, text="Read Story", command=self.start_reading_story,
+                                     font=("Arial", 12, "bold"), bg="#28a745", fg="white",
+                                     activebackground="#218838", activeforeground="white",
+                                     relief=tk.RAISED, bd=3, cursor="hand2")
+        self.read_button.grid(row=0, column=0, padx=5, sticky="ew")
+        # Initially disable read button until a story is generated
+        self.read_button.config(state=tk.DISABLED if not self.tts_engine_ready else tk.NORMAL)
+
+
+        self.stop_button = tk.Button(self.tts_button_frame, text="Stop Reading", command=self.stop_reading_story,
+                                     font=("Arial", 12, "bold"), bg="#dc3545", fg="white",
+                                     activebackground="#c82333", activeforeground="white",
+                                     relief=tk.RAISED, bd=3, cursor="hand2")
+        self.stop_button.grid(row=0, column=1, padx=5, sticky="ew")
+        # Initially disable stop button
+        self.stop_button.config(state=tk.DISABLED)
+
     def show_message(self, message, is_error=False):
         """Displays a message in the message label with appropriate color."""
         self.message_label.config(text=message, fg="red" if is_error else "#2563eb") # Blue for info, red for error
@@ -178,6 +216,10 @@ class StoryGeneratorApp:
         self.few_shot_radio.config(state=state)
         self.chain_of_thought_radio.config(state=state)
         self.generate_button.config(state=state)
+        # Disable TTS buttons when other inputs are disabled (e.g., during generation)
+        self.read_button.config(state=tk.DISABLED)
+        self.stop_button.config(state=tk.DISABLED)
+
 
     def start_story_generation(self):
         """Starts the story generation process in a separate thread."""
@@ -224,8 +266,51 @@ class StoryGeneratorApp:
 
         if "Error:" in generated_story or "Could not generate" in generated_story:
             self.show_message("Story generation failed. See output for details.", is_error=True)
+            self.read_button.config(state=tk.DISABLED) # Keep read button disabled on error
         else:
             self.show_message("Story generated successfully!", is_error=False) # Success message
+            if self.tts_engine_ready:
+                self.read_button.config(state=tk.NORMAL) # Enable read button if TTS is ready
+
+    def start_reading_story(self):
+        """Starts reading the story aloud in a separate thread."""
+        if not self.tts_engine_ready:
+            messagebox.showwarning("TTS Not Ready", "Text-to-Speech engine is not available.")
+            return
+
+        story_text = self.story_output.get(1.0, tk.END).strip()
+        if not story_text or story_text == "Generating story... Please wait.":
+            self.show_message("No story to read.", is_error=True)
+            return
+
+        self.read_button.config(state=tk.DISABLED)
+        self.stop_button.config(state=tk.NORMAL)
+        self.show_message("Reading story...", is_error=False)
+
+        # Start TTS in a new thread
+        threading.Thread(target=self._read_story_thread, args=(story_text,)).start()
+
+    def _read_story_thread(self, text):
+        """Threaded function to handle TTS."""
+        if self.tts_engine:
+            self.tts_engine.say(text)
+            self.tts_engine.runAndWait()
+            # After speech is done, update button states on the main thread
+            self.master.after(0, self._update_tts_buttons_after_speech)
+
+    def stop_reading_story(self):
+        """Stops the current story narration."""
+        if self.tts_engine:
+            self.tts_engine.stop()
+            self.show_message("Story narration stopped.", is_error=False)
+            self.read_button.config(state=tk.NORMAL)
+            self.stop_button.config(state=tk.DISABLED)
+
+    def _update_tts_buttons_after_speech(self):
+        """Updates TTS button states after speech finishes naturally."""
+        self.read_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED)
+        self.clear_message() # Clear "Reading story..." message
 
 if __name__ == "__main__":
     root = tk.Tk()
