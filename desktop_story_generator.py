@@ -8,6 +8,7 @@ import os
 from dotenv import load_dotenv
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+import fitz # Import for PDF reading
 
 # Load environment variables from .env file
 load_dotenv()
@@ -88,7 +89,18 @@ class StoryGeneratorApp:
         self.api_stop_event = threading.Event()
         self.generation_thread = None
 
+        # New: Language mapping
+        self.language_map = {
+            "English": "en",
+            "Hindi": "hi",
+            "Spanish": "es",
+            "French": "fr"
+            # Add more languages here as needed
+        }
+        self.reverse_language_map = {v: k for k, v in self.language_map.items()}
+
         self.setup_ui()
+        self.update_language_options()
         self.update_tts_options()
 
     def setup_ui(self):
@@ -107,14 +119,18 @@ class StoryGeneratorApp:
         inputs_frame = ttk.Frame(self.master, padding=(10, 5))
         inputs_frame.grid(row=1, column=0, sticky="ew")
         inputs_frame.grid_columnconfigure(0, weight=1)
+        inputs_frame.grid_columnconfigure(1, weight=0)
 
-        ttk.Label(inputs_frame, text="Enter your story prompt/topic:", font=("Helvetica", 12, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 5))
+        ttk.Label(inputs_frame, text="Enter your story prompt/topic:", font=("Helvetica", 12, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 5), columnspan=2)
         self.prompt_entry = ttk.Entry(inputs_frame, font=("Helvetica", 11), bootstyle="primary")
         self.prompt_entry.grid(row=1, column=0, sticky="ew")
         self.prompt_entry.bind("<KeyRelease>", self.update_prompt_char_count)
 
+        self.upload_button = ttk.Button(inputs_frame, text="Upload PDF", command=self.upload_pdf, bootstyle="secondary", cursor="hand2")
+        self.upload_button.grid(row=1, column=1, padx=(5, 0), sticky="ew")
+
         self.char_count_label = ttk.Label(inputs_frame, text="Characters: 0", font=("Helvetica", 10))
-        self.char_count_label.grid(row=2, column=0, sticky="e", pady=(5, 0))
+        self.char_count_label.grid(row=2, column=0, sticky="e", pady=(5, 0), columnspan=2)
 
         # --- PROMPT METHOD FRAME ---
         method_frame = ttk.Frame(self.master, padding=(10, 10))
@@ -159,23 +175,30 @@ class StoryGeneratorApp:
         tts_frame.grid_columnconfigure(1, weight=1)
         tts_frame.grid_columnconfigure(2, weight=1)
 
+        # New: Language selection
+        language_label = ttk.Label(tts_frame, text="Language:", font=("Helvetica", 10))
+        language_label.grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self.language_combo = ttk.Combobox(tts_frame, state="readonly", bootstyle="info")
+        self.language_combo.grid(row=0, column=1, columnspan=2, sticky="ew", padx=(0, 5))
+        self.language_combo.bind("<<ComboboxSelected>>", self.update_voice_options)
+
         # Voice selection
         voice_label = ttk.Label(tts_frame, text="Voice:", font=("Helvetica", 10))
-        voice_label.grid(row=0, column=0, sticky="w", padx=(0, 5))
+        voice_label.grid(row=1, column=0, sticky="w", padx=(0, 5)) # New row
         self.voice_combo = ttk.Combobox(tts_frame, state="readonly", bootstyle="info")
-        self.voice_combo.grid(row=0, column=1, columnspan=2, sticky="ew", padx=(0, 5))
+        self.voice_combo.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(0, 5)) # New row
         self.voice_combo.bind("<<ComboboxSelected>>", self.set_tts_voice)
 
         # Rate slider
         rate_label = ttk.Label(tts_frame, text="Speech Rate:", font=("Helvetica", 10))
-        rate_label.grid(row=1, column=0, sticky="w", pady=(5, 0))
+        rate_label.grid(row=2, column=0, sticky="w", pady=(5, 0)) # New row
         self.rate_slider = ttk.Scale(tts_frame, from_=100, to=250, orient=tk.HORIZONTAL, command=self.set_tts_rate)
         self.rate_slider.set(170)
-        self.rate_slider.grid(row=1, column=1, columnspan=2, sticky="ew", pady=(5, 0))
+        self.rate_slider.grid(row=2, column=1, columnspan=2, sticky="ew", pady=(5, 0)) # New row
 
         # Buttons
         read_stop_frame = ttk.Frame(tts_frame)
-        read_stop_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        read_stop_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0)) # New row
         read_stop_frame.grid_columnconfigure(0, weight=1)
         read_stop_frame.grid_columnconfigure(1, weight=1)
 
@@ -186,7 +209,7 @@ class StoryGeneratorApp:
         self.stop_button.grid(row=0, column=1, sticky="ew", padx=(5, 0))
 
         self.save_button = ttk.Button(tts_frame, text="Save Story", command=self.save_story, bootstyle="info", cursor="hand2", state=tk.DISABLED)
-        self.save_button.grid(row=2, column=2, sticky="ew", pady=(10, 0), padx=(5, 0))
+        self.save_button.grid(row=3, column=2, sticky="ew", pady=(10, 0), padx=(5, 0)) # New row
 
         # --- STATUS BAR ---
         self.status_bar = ttk.Label(self.master, text="Ready.", font=("Helvetica", 10), bootstyle="secondary")
@@ -196,16 +219,61 @@ class StoryGeneratorApp:
         char_count = len(self.prompt_entry.get())
         self.char_count_label.config(text=f"Characters: {char_count}")
 
-    def update_tts_options(self):
+    def update_language_options(self):
+        """Populates the language combobox with available options."""
         if self.tts_engine_ready:
-            voice_names = [v.name for v in self.voices]
+            available_languages = set()
+            for voice in self.voices:
+                # The language code is often in the voice ID
+                lang_code_parts = voice.id.split('_')
+                if len(lang_code_parts) > 1:
+                    lang_code = lang_code_parts[1].split('-')[0].lower()
+                    if lang_code in self.reverse_language_map:
+                        available_languages.add(self.reverse_language_map[lang_code])
+            
+            # Sort and set the values
+            sorted_languages = sorted(list(available_languages))
+            self.language_combo['values'] = sorted_languages
+            if "English" in sorted_languages:
+                self.language_combo.set("English")
+            elif sorted_languages:
+                self.language_combo.set(sorted_languages[0])
+
+            self.update_voice_options()
+        else:
+            self.language_combo.config(state="disabled")
+
+    def update_voice_options(self, event=None):
+        """Populates the voice combobox based on the selected language."""
+        if self.tts_engine_ready:
+            selected_language_name = self.language_combo.get()
+            selected_lang_code = self.language_map.get(selected_language_name, "en") # Default to English
+
+            # Filter voices by language code
+            filtered_voices = [
+                voice for voice in self.voices 
+                if voice.id.lower().startswith(f"hkey_local_machine\\software\\microsoft\\speech\\voices\\tokens\\{selected_lang_code}")
+            ]
+            
+            voice_names = [v.name for v in filtered_voices]
             self.voice_combo['values'] = voice_names
+            
             if voice_names:
                 self.voice_combo.set(voice_names[0])
-                self.tts_engine.setProperty('voice', self.voices[0].id)
-            self.rate_slider.set(self.tts_engine.getProperty('rate'))
+                self.tts_engine.setProperty('voice', filtered_voices[0].id)
+                self.voice_combo.config(state="readonly")
+            else:
+                self.voice_combo.set("No voices found")
+                self.voice_combo.config(state="disabled")
+                self.tts_engine.setProperty('voice', None)
         else:
             self.voice_combo.config(state="disabled")
+            
+    def update_tts_options(self):
+        """Sets the rate slider value."""
+        if self.tts_engine_ready:
+            self.rate_slider.set(self.tts_engine.getProperty('rate'))
+        else:
             self.rate_slider.config(state="disabled")
 
     def set_tts_voice(self, event):
@@ -227,11 +295,12 @@ class StoryGeneratorApp:
     def set_inputs_state(self, state):
         self.prompt_entry.config(state=state)
         self.generate_button.config(state=state)
+        self.upload_button.config(state=state)
+        self.language_combo.config(state="disabled" if state == tk.DISABLED else "readonly") # New control
         self.voice_combo.config(state="disabled" if state == tk.DISABLED else "readonly")
         self.rate_slider.config(state=state)
         self.save_button.config(state=tk.DISABLED)
         
-        # Reset radio buttons
         for child in self.master.winfo_children():
             if isinstance(child, ttk.Frame):
                 for sub_child in child.winfo_children():
@@ -287,12 +356,10 @@ class StoryGeneratorApp:
             if story_marker in processed_story_text:
                  processed_story_text = processed_story_text.rsplit(story_marker, 1)[-1].strip()
             
-            # General fallback if specific markers are missed
             lines = processed_story_text.split('\n')
             story_lines = [line for line in lines if not line.strip().startswith(('1.', '2.', '3.'))]
             processed_story_text = '\n'.join(story_lines).strip()
             
-            # Final cleaning
             processed_story_text = processed_story_text.replace('Let\'s think step by step to create a compelling short story about:', '').replace(f'{self.prompt_entry.get()}', '').strip()
 
         return processed_story_text
@@ -316,8 +383,6 @@ class StoryGeneratorApp:
         self.api_stop_event.set()
         self.show_status("Canceling story generation...", "warning")
         if self.generation_thread and self.generation_thread.is_alive():
-            # You can't force-stop a thread, so we'll just wait for it to finish gracefully
-            # The stop event will cause the API call to return early.
             pass
         self.progress_bar.stop()
         self.set_inputs_state(tk.NORMAL)
@@ -380,12 +445,42 @@ class StoryGeneratorApp:
             except Exception as e:
                 self.show_status(f"Failed to save file: {e}", "danger")
 
+    def upload_pdf(self):
+        file_path = filedialog.askopenfilename(
+            title="Select a PDF file",
+            filetypes=[("PDF files", "*.pdf")]
+        )
+        if not file_path:
+            return
+
+        self.show_status("Reading PDF file...", "info")
+        extracted_text = self.read_pdf_text(file_path)
+
+        if extracted_text:
+            self.prompt_entry.delete(0, tk.END)
+            self.prompt_entry.insert(0, extracted_text)
+            self.update_prompt_char_count()
+            self.show_status("PDF content loaded into prompt entry.", "success")
+        else:
+            self.show_status("Failed to read PDF. It might be password-protected or corrupt.", "danger")
+
+    def read_pdf_text(self, pdf_path):
+        try:
+            doc = fitz.open(pdf_path)
+            text = ""
+            for page in doc:
+                text += page.get_text()
+            doc.close()
+            return text
+        except Exception as e:
+            messagebox.showerror("PDF Error", f"Could not read PDF: {e}")
+            return None
+
 if __name__ == "__main__":
-    # Check if API_KEY is set before running the app
     if API_KEY is None:
         messagebox.showerror("API Key Error", "GEMINI_API_KEY not found. Please create a .env file with GEMINI_API_KEY='YOUR_API_KEY_HERE'")
     else:
-        app_theme = "solar" # You can change this to another theme like "darkly", "litera", "cosmo", etc.
+        app_theme = "solar"
         root = ttk.Window(themename=app_theme)
         app = StoryGeneratorApp(root)
         root.mainloop()
